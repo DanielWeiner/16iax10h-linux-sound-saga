@@ -1,97 +1,176 @@
-# $2000 Bug Bounty to Whoever Fixes the Lenovo Legion Pro 7 16IAX10H's Speakers on Linux
+# Guide: Linux Audio on the Lenovo Legion Pro 7i Gen 10 (16IAX10H)
 
-We are a bunch of Linux users with the Lenovo Legion Pro 7 (16IAX10H) and we are **sick and tired** of our speakers not working properly. We also suck at writing Linux kernel audio drivers, especially when weird things like "Awinic smart amplifiers" are involved. **If you help us make sure that Linux has support for audio on our laptops, we will send you a lot of money.**
+This guide explains how to get audio working correctly on the Lenovo Legion Pro 7i Gen 10 (16IAX10H).
 
-# IMPORTANT ANNOUNCEMENT: WE HAVE A FIX
-@Lyapsus and I have JUST TESTED A WORKING FIX. MORE INFO COMING SOON!
+Since this solution is still very new, it will take some time for all components to be properly integrated into the Linux kernel. Until that happens, you can follow the steps below, which have been rigorously tested and are confirmed to work.
 
-## Bug bounty pledges
+**This guide is currently for Linux kernel version 6.17.8. It will be updated for future kernel versions as they are released, until the fix is fully integrated into the kernel.**
 
-The following individuals pledge the following amount to the bug bounty, to be paid in full to whoever fixes this bug:
+## Step 1: Install the AW88399 Firmware
 
-- **$1000 USD** pledged by Alderon Games @deathlyrage
-- **$500 USD** pledged by @nadimkobeissi (me, organizer of this effort)
-- **$200 USD** [pledged](https://github.com/nadimkobeissi/16iax10h-linux-sound-saga/issues/1) by @Detritalgeo
-- **$200 USD** [pledged](https://github.com/nadimkobeissi/16iax10h-linux-sound-saga/issues/2) by @cerroverb
-- **$70 USD** pledged by @robot-o 
-- **$30 USD** [pledged](https://github.com/nadimkobeissi/16iax10h-linux-sound-saga/issues/4) by @atlasfoo
+Copy the `aw88399_acf.bin` file provided in this repository to `/lib/firmware/aw88399_acf.bin`.
 
-**Want to add an amount to the pledge? Please send in a pull request!**
+If you prefer to obtain your own copy of this firmware blob, [follow these instructions](https://bugzilla.kernel.org/show_bug.cgi?id=218329#c18).
 
-## What is the problem?
+## Step 2: Download the Linux Kernel 6.17.8 Sources
 
-The internal speakers on my Lenovo Legion Pro 7 16IAX10H (and several other Lenovo laptops with the Realtek ALC3306 codec) produce extremely low volume audio that sounds tinny and muffled - as if only the tweeters are working, not the woofers.
+Download the kernel sources by clicking [here](https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.17.8.tar.xz).
 
-### What's actually happening (I think)
+## Step 3: Patch the Linux Kernel Sources
 
-The laptop has a **Realtek ALC3306** codec (according to official Lenovo specs), but Linux incorrectly detects it as an **ALC287** with subsystem ID `17aa:3906`. The kernel driver applies a generic fallback fixup instead of a device-specific one, which causes the woofer/bass speakers to not be driven properly.
+Copy the `16iax10h-audio-linux-6.17.8.patch` file from this repository into the root of your Linux kernel source directory. Then run:
 
-After investigation, it turns out the Legion Pro 7 16IAX10H uses **Awinic AWDZ8399 smart amplifiers** (at I2C addresses 0x34 and 0x35 on i2c-2). While a kernel driver exists (`snd_soc_aw88399`) and loads correctly, there's no integration between the codec and the amplifiers in the audio pipeline.
+```bash
+patch -p1 < 16iax10h-audio-linux-6.17.8.patch
+```
 
-Specifically:
-- The SOF (Sound Open Firmware) driver can be forced to load, but it falls back to a generic machine driver (`skl_hda_dsp_generic`)
-- This uses a generic topology that only includes HDA codec paths - **no I2C amplifier support**
-- The required topology file (something like `sof-arl-alc287-aw88399.tplg`) doesn't exist in the SOF firmware package
-- No ACPI/DMI quirk exists for subsystem ID `17aa:3906` to properly configure the audio pipeline
+The patch should apply successfully to 10 files without any errors.
 
+## Step 4: Configure the Kernel
 
-**The above is somewhat speculative**. Could be something else! What do I know? Since when do I know how Linux audio drivers work?!
+For the fix to work, the following kernel configuration options must be enabled:
 
-## Where this is being discussed
+```
+CONFIG_SND_HDA_SCODEC_AW88399=m
+CONFIG_SND_HDA_SCODEC_AW88399_I2C=m
+CONFIG_SND_SOC_AW88399=m
+CONFIG_SND_SOC_SOF_INTEL_TOPLEVEL=y
+CONFIG_SND_SOC_SOF_INTEL_COMMON=m
+CONFIG_SND_SOC_SOF_INTEL_MTL=m
+CONFIG_SND_SOC_SOF_INTEL_LNL=m
+```
 
-Arranged from most to least useful/likely to lead to progress.
+Configure the rest of the kernel as appropriate for your machine.
 
-- [Kernel.org Bugzilla discussion I'm trying to be active in](https://bugzilla.kernel.org/show_bug.cgi?id=218329)
-- [Directly relevant discussion on Fedora forums](https://discussion.fedoraproject.org/t/problems-with-audio-driver-alc3306-in-a-legion-pro-7-gen-10-and-other-similar-lenovo-laptops/161992)
-- [Directly relevant discussion on Lenovo forums](https://forums.lenovo.com/t5/Ubuntu/Legion-Pro-7-16IAX10H-Ubuntu-ALC3306-sound/m-p/5376602)
-- [Directly relevant discussion on Garuda Linux forums](https://forum.garudalinux.org/t/audio-issues-on-lenovo-legion-pro-7-16iax10h/46291)
-- [Directly relevant discussion on CachyOS forums](https://discuss.cachyos.org/t/speakers-are-tinny-and-not-playing-mids-or-lows-on-lenovo-legion-pro-7i-10th-gen-2025/15864/7)
-- [Directly relevant discussion on Linux Mint forums](https://forums.linuxmint.com/viewtopic.php?t=457586)
-- [Reddit](https://www.reddit.com/r/LenovoLegion/comments/1lg63ms/linux_support_on_lenovo_legion_pro_7i_gen_10/) (just some casual comments)
+## Step 5: Compile and Install the Kernel
 
-## Technical documents
+```bash
+make -j24
+make -j24 modules
+sudo make -j24 modules_install
+sudo cp -f arch/x86/boot/bzImage /boot/vmlinuz-linux-16iax10h-audio
+```
 
-- [Official Lenovo spec sheet](https://psref.lenovo.com/Product/Legion/Legion_Pro_7_16IAX10H?tab=spec)
+## Step 6: Generate the initramfs
 
-## Things most likely to work
+The process differs between distributions, as some use `dracut` while others use `mkinitcpio`. Instructions for common distributions are provided below.
 
-A kernel audio developer will need to create:
+### Arch Linux (Tested)
 
-1. **A custom SOF topology file** (e.g., `sof-arl-alc287-aw88399.tplg`) that properly chains:
-   - The HDA codec (ALC287/ALC3306)
-   - The I2C smart amplifiers (AW88399 at addresses 0x34/0x35)
-   - Proper routing and gain staging
+First, create a new preset file for your custom kernel:
 
-2. **A DMI/ACPI quirk** in the kernel that matches your subsystem ID (`17aa:3906` and the other affected models) and tells SOF to use this topology.
+```bash
+sudo cp /etc/mkinitcpio.d/linux.preset /etc/mkinitcpio.d/linux-16iax10h-audio.preset
+```
 
-3. **Possibly an amplifier initialization sequence** to properly configure the AW88399 chips.
+Edit `/etc/mkinitcpio.d/linux-16iax10h-audio.preset` to look like this:
 
-**Why this is likely:** The [kernel bugzilla discussion](https://bugzilla.kernel.org/show_bug.cgi?id=218329) is the right venue, the infrastructure already exists (the `snd_soc_aw88399` driver is loaded), and the exact missing pieces have been identified.
+```bash
+# mkinitcpio preset file for the 'linux-16iax10h-audio' package
 
-## Things that are not likely to work
+ALL_kver="/boot/vmlinuz-linux-16iax10h-audio"
+PRESETS=('default')
+default_image="/boot/initramfs-linux-16iax10h-audio.img"
+```
 
-**HDA verb sniffing**
+Then generate the initramfs:
 
-[This seems to have worked for 2020 models.](https://github.com/thiagotei/linux-realtek-alc287/tree/main/lenovo-legion) The idea is to use QEMU in order to sniff the HDA verbs from the Windows drivers, and then replicate those on Linux.
+```bash
+sudo mkinitcpio -p linux-16iax10h-audio
+```
 
-[A tutorial on how to use QEMU to sniff verbs is available here](https://github.com/ryanprescott/realtek-verb-tools/wiki/How-to-sniff-verbs-from-a-Windows-sound-driver), but the QEMU fork is ancient and is apparently impossible to compile anymore with modern dependency versions.
+Finally, update your bootloader configuration. For GRUB, run:
 
-Additionally, [here are some debugging tools for testing HDA verbs on Linux](https://github.com/ryanprescott/realtek-verb-tools?tab=readme-ov-file).
+```bash
+sudo grub-mkconfig -o /boot/grub/grub.cfg
+```
 
-**Why this is unlikely to work:**
-- The issue isn't just HDA codec configuration, we need to integrate I2C amplifiers.
-- The AW88399 amps need I2C initialization commands, not just HDA verbs.
-- The QEMU toolchain being unmaintained is a bad sign.
+For systemd-boot, create a new boot entry in `/boot/loader/entries/arch-16iax10h-audio.conf`:
 
-## Things that absolutely do not work
+```
+title   Arch Linux (16IAX10H Audio)
+linux   /vmlinuz-linux-16iax10h-audio
+initrd  /initramfs-linux-16iax10h-audio.img
+options root=PARTUUID=your-root-partition-uuid rw snd_intel_dspcfg.dsp_driver=3
+```
 
-- [Completely useless](https://github.com/aenawi/lenovo-legion-linux-audio)
-- [Solutions that involve Yoga-specific kernel quirks](https://discussion.fedoraproject.org/t/lenovo-yoga-pro-7-14asp10-audio-issue-no-all-speakers-firing/163480/2)
-- `options snd-hda-intel model=alc287-yoga9-bass-spk-pin`
-- Switching to SOF drivers
+Replace `your-root-partition-uuid` with your actual root partition UUID (find it by running `blkid`).
 
-## Are you also having this problem???
+**Note:** You must include `snd_intel_dspcfg.dsp_driver=3` in your kernel boot parameters.
 
-If so, please yell loudly at my general direction! Try to raise it up on kernel audio mailing lists! Respond to this [kernel.org Bugzilla discussion I'm trying to be active in](https://bugzilla.kernel.org/show_bug.cgi?id=218329)!
+### Fedora
 
-**You can also participate in the bug bounty pledge by sending a pull request to this `README.md` file adding your amount above.**
+First, generate the initramfs for your custom kernel:
+
+```bash
+sudo dracut --force /boot/initramfs-linux-16iax10h-audio.img --kver $(cat include/config/kernel.release)
+```
+
+Then update your bootloader configuration. For GRUB, run:
+
+```bash
+sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+```
+
+For systemd-boot, create a new boot entry in `/boot/loader/entries/fedora-16iax10h-audio.conf`:
+
+```
+title   Fedora Linux (16IAX10H Audio)
+linux   /vmlinuz-linux-16iax10h-audio
+initrd  /initramfs-linux-16iax10h-audio.img
+options root=UUID=your-root-partition-uuid rw snd_intel_dspcfg.dsp_driver=3
+```
+
+Replace `your-root-partition-uuid` with your actual root partition UUID (find it by running `blkid`).
+
+**Note:** You must include `snd_intel_dspcfg.dsp_driver=3` in your kernel boot parameters.
+
+## Step 7: Reboot into the Patched Kernel
+
+Reboot into the patched kernel. After rebooting, run `uname -a` to verify that you're running the correct kernel.
+
+## Step 8: Install the Patched ALSA UCM2 Configuration
+
+This step is necessary for proper volume control.
+
+Copy the `HiFi-analog.conf` file from this repository to `/usr/share/alsa/ucm2/HDA/HiFi-analog.conf`, overwriting the existing file:
+
+```bash
+sudo cp -f HiFi-analog.conf /usr/share/alsa/ucm2/HDA/HiFi-analog.conf
+```
+
+Then run the following commands:
+
+```bash
+alsaucm reset
+alsaucm reload
+amixer sset Master 100%
+amixer sset Headphone 100%
+amixer sset Speaker 100%
+```
+
+**Note:** The last three commands are for speaker calibration, not for setting your volume to maximum. They must be run for the speakers to function properly, but they do not control your actual volume level.
+
+## Step 9: Enjoy Working Audio!
+
+That's it! Your audio should now work correctly and permanently. This fix will persist across reboots with no additional steps required.
+
+## Disclaimer
+
+I, Nadim Kobeissi, attest that all components of the fix provided here have been tested and work without any apparent harmful effects. The fix components are provided in good faith. However, I (as well as the main fix authors) disclaim all responsibility for any use of this fix and guide:
+
+```
+THE PROGRAM IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE. THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE PROGRAM IS WITH YOU. SHOULD THE PROGRAM PROVE DEFECTIVE, YOU ASSUME THE COST OF ALL NECESSARY SERVICING, REPAIR OR CORRECTION.
+```
+
+## Credits
+
+Fixing this issue required weeks of intensive work from multiple people.
+
+Approximately 95% of the engineering work was done by [Lyapsus](https://github.com/Lyapsus). Lyapsus improved an incomplete kernel driver, wrote new kernel codecs and side-codecs, and contributed much more. I want to emphasize his incredible kindness and dedication to solving this issue. He is the primary force behind this fix, and without him, it would never have been possible.
+
+I ([Nadim Kobeissi](https://nadim.computer)) conducted the initial investigation that identified the missing components needed for audio to work on the 16IAX10H on Linux. Building on what I learned from Lyapsus's work, I helped debug and clean up his kernel code, tested it, and made minor improvements. I also contributed the solution to the volume control issue documented in Step 8, and wrote this guide.
+
+Gergo K. showed me how to extract the AW88399 firmware from the Windows driver package and install it on Linux, as documented in Step 1.
+
+Sincere thanks to everyone who [pledged](PLEDGE.md) a reward for solving this problem. The reward goes to Lyapsus.
